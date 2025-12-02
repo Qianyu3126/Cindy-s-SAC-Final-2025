@@ -1,5 +1,3 @@
-# Tilt Quest
-
 import time
 
 import hardware
@@ -7,10 +5,8 @@ import config
 import display_ui
 import game_core
 
-# Global state for initial boot animation
 FIRST_BOOT = True
 
-# Main Game Loop Function
 def main_game_loop():
     """Main loop for difficulty/level selection and running the game."""
     global FIRST_BOOT
@@ -38,12 +34,9 @@ def main_game_loop():
 
 # Initialization and Execution
 if __name__ == "__main__":
-    # Initialize all hardware
     hw_components = hardware.init_hardware()
-    
-    # Pass hardware references to modules that need them
+
     display_ui.setup_ui(hw_components)
     game_core.setup_core(hw_components)
-    
-    # Start the main loop
+
     main_game_loop()

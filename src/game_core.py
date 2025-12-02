@@ -1,27 +1,41 @@
-# game_core.py -- Game Parameters and Gesture Detection
-
 import time
 import random
 
-import config
+import config  
 
-# Global variables for hardware access (will be set by setup_core)
 accelerometer = None
 encoder = None
 button = None
 pixels = None
 
+# ----------------- Accelerometer calibration -----------------
+X0 = 0.0
+Y0 = 0.0
+Z0 = 0.0
+
 def setup_core(hw):
-    """Initializes core-related global variables using hardware objects."""
-    global accelerometer, encoder, button, pixels
+    """Setup hardware globals and calibrate accelerometer."""
+    global accelerometer, encoder, button, pixels, X0, Y0, Z0
     accelerometer = hw["accelerometer"]
     encoder = hw["encoder"]
     button = hw["button"]
     pixels = hw["pixels"]
 
-# ----------------- Game Parameters -----------------
+    # Calibrate accelerometer offsets
+    samples = 50
+    sum_x = sum_y = sum_z = 0.0
+    for _ in range(samples):
+        ax, ay, az = accelerometer.acceleration
+        sum_x += ax
+        sum_y += ay
+        sum_z += az
+        time.sleep(0.02)
+    X0 = sum_x / samples
+    Y0 = sum_y / samples
+    Z0 = sum_z / samples
+    print(f"Accelerometer calibrated: X0={X0:.2f}, Y0={Y0:.2f}, Z0={Z0:.2f}")
+
 def params_for(difficulty, level):
-    """Calculates game parameters based on difficulty and level."""
     cfg = config.DIFFICULTY_CONFIG[difficulty]
     level = max(1, min(10, level))
     reaction = max(0.8, cfg["base_reaction"] - (level - 1) * 0.12)
@@ -44,16 +58,16 @@ def params_for(difficulty, level):
         "score_to_win": 6
     }
 
-# ----------------- Gesture Detection -----------------
+
 def wait_for_gesture(timeout, target, params):
-    """Waits for the player to perform the target gesture within the timeout."""
     start = time.monotonic()
 
     def back_to_neutral(t=1.2):
-        """Waits for the accelerometer to return to a relatively neutral state."""
         t0 = time.monotonic()
         while time.monotonic() - t0 < t:
             ax, ay, az = accelerometer.acceleration
+            ax -= X0
+            ay -= Y0
             if abs(ax) < params["noise_threshold"] and abs(ay) < params["noise_threshold"]:
                 return True
             time.sleep(0.03)
@@ -63,7 +77,6 @@ def wait_for_gesture(timeout, target, params):
     local_buf = 0
 
     while time.monotonic() - start < timeout:
-        # Twist
         if target == "Twist":
             diff = encoder.update()
             if diff:
@@ -81,8 +94,10 @@ def wait_for_gesture(timeout, target, params):
             time.sleep(0.02)
             continue
 
-        # Tilt
         x, y, z = accelerometer.acceleration
+        x -= X0
+        y -= Y0
+
         x = 0 if abs(x) < params["noise_threshold"] else x
         y = 0 if abs(y) < params["noise_threshold"] else y
 
@@ -103,12 +118,9 @@ def wait_for_gesture(timeout, target, params):
 
     return None
 
-# ----------------- Game Engine -----------------
-# We put the run_level here too, as it is the main execution loop for the game.
 import display_ui
 
 def run_level(difficulty, level):
-    """Runs a single level of the game."""
     p = params_for(difficulty, level)
 
     MOVES = p["moves"]
@@ -117,18 +129,18 @@ def run_level(difficulty, level):
     SCORE_TO_WIN = p["score_to_win"]
 
     display_ui.show_lines([f"{difficulty} Level {level}", "", "Press button to start"])
-    
-    # Wait for button press to start
-    while button.value: time.sleep(0.01)
+    while button.value:
+        time.sleep(0.01)
     time.sleep(0.2)
-    while not button.value: time.sleep(0.01)
+    while not button.value:
+        time.sleep(0.01)
 
     pixels.fill(config.BLUE)
     score = 0
     mistakes = 0
 
     while True:
-        # Game over check
+        # Game over
         if mistakes >= MISTAKES_ALLOWED:
             pixels.fill(config.RED)
             display_ui.show_lines(["GAME OVER", f"Score: {score}", "", "Press button"])
@@ -136,7 +148,7 @@ def run_level(difficulty, level):
             while not button.value: time.sleep(0.02)
             return False
 
-        # Win check
+        # Win
         if score >= SCORE_TO_WIN:
             pixels.fill(config.GREEN)
             display_ui.show_lines(["YOU WIN!!", f"Score: {score}", "", "Press button"])
@@ -151,13 +163,15 @@ def run_level(difficulty, level):
 
         act = wait_for_gesture(REACTION, target, p)
 
-        # Process result
         if act is None:
             pixels.fill(config.RED)
             display_ui.show_command_with_header("Too Slow", short, level)
             mistakes += 1
             time.sleep(0.6)
-        elif act == target:
+            pixels.fill(config.BLUE)
+            continue
+
+        if act == target:
             pixels.fill(config.GREEN)
             display_ui.show_command_with_header("Good!", short, level)
             score += 1
@@ -169,3 +183,4 @@ def run_level(difficulty, level):
             time.sleep(0.6)
 
         pixels.fill(config.BLUE)
+
